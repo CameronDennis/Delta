@@ -4,6 +4,15 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # Workflow edits and the probe source alone do not start a build;
+    # press "Run workflow" in the Actions tab to build them.
+    paths-ignore:
+      - '.github/**'
+      - 'Delta/SteamProbe/**'
+
+concurrency:
+  group: build
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -30,6 +39,45 @@ jobs:
         run: |
           xcodebuild -version
           xcodebuild -list -workspace Delta.xcworkspace
+
+      - name: Add Steam Controller probe to the project
+        run: |
+          sudo gem install xcodeproj --no-document
+          ruby <<'RUBY'
+          require 'xcodeproj'
+
+          # 1. Compile SteamProbe.swift into the Delta target.
+          proj = Xcodeproj::Project.open('Delta.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'Delta' }
+          abort 'Delta target not found' unless target
+          swift_path = 'Delta/SteamProbe/SteamProbe.swift'
+          abort "#{swift_path} is missing" unless File.exist?(swift_path)
+          already = target.source_build_phase.files_references.compact.any? { |r| r.path.to_s.end_with?('SteamProbe.swift') }
+          unless already
+            ref = proj.main_group.new_reference(swift_path)
+            target.add_file_references([ref])
+            proj.save
+            puts "Added #{swift_path} to target Delta"
+          end
+
+          # 2. Start the probe right after Delta starts monitoring controllers.
+          app = 'Delta/AppDelegate.swift'
+          src = File.read(app)
+          hook = 'ExternalGameControllerManager.shared.startMonitoring()'
+          unless src.include?('SteamProbe.shared.install()')
+            abort 'hook line not found in AppDelegate' unless src.include?(hook)
+            File.write(app, src.sub(hook, "#{hook}\n        SteamProbe.shared.install()"))
+            puts 'Patched AppDelegate'
+          end
+
+          # 3. Bluetooth needs a usage description or iOS kills the app.
+          plist = 'Delta/Supporting Files/Info.plist'
+          key = 'NSBluetoothAlwaysUsageDescription'
+          unless system('/usr/libexec/PlistBuddy', '-c', "Print :#{key}", plist, out: File::NULL, err: File::NULL)
+            system('/usr/libexec/PlistBuddy', '-c', "Add :#{key} string 'Used by the Steam Controller experiment to read the controller.'", plist) or abort 'Info.plist edit failed'
+            puts 'Added Bluetooth usage description'
+          end
+          RUBY
 
       - name: Build (unsigned)
         run: |
