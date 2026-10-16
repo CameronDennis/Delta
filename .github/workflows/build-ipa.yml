@@ -44,9 +44,12 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             2>&1 | tee build.log
 
-      - name: Show the end of the log if the build failed
+      - name: Show errors from the log if the build failed
         if: failure()
-        run: tail -n 150 build.log
+        run: |
+          grep -n -E "error:|fatal error|Stack dump|Segmentation fault|Killed|No space left|Please submit a bug" build.log | head -80 || true
+          echo "----- last 40 lines -----"
+          tail -n 40 build.log
 
       - name: Package IPA
         run: |
