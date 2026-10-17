@@ -86,15 +86,16 @@ jobs:
           proj = Xcodeproj::Project.open('Delta.xcodeproj')
           target = proj.targets.find { |t| t.name == 'Delta' }
           abort 'Delta target not found' unless target
-          path = 'Delta/SteamProbe/SteamController.swift'
-          abort "#{path} is missing" unless File.exist?(path)
-          already = target.source_build_phase.files_references.compact.any? { |r| r.path.to_s.end_with?('SteamController.swift') }
-          unless already
+          %w[SteamController.swift SteamTouchscreen.swift].each do |file|
+            path = "Delta/SteamProbe/#{file}"
+            abort "#{path} is missing" unless File.exist?(path)
+            already = target.source_build_phase.files_references.compact.any? { |r| r.path.to_s.end_with?(file) }
+            next if already
             ref = proj.main_group.new_reference(path)
             target.add_file_references([ref])
-            proj.save
             puts "Added #{path} to target Delta"
           end
+          proj.save
           app = 'Delta/AppDelegate.swift'
           src = File.read(app)
           unless src.include?('SteamController.shared.start()')
