@@ -262,7 +262,7 @@ private extension ControllerInputsViewController
                 image = #imageLiteral(resourceName: "Screenshot")
                 text = NSLocalizedString("Screenshot", comment: "")
                 
-            case .toggleFastForward, .reverseScreens: continue
+            case .toggleFastForward, .reverseScreens, .toggleFirmPress: continue
             }
             
             let item = MenuItem(text: text, image: image) { [unowned self] (item) in
