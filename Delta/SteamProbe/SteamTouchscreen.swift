@@ -41,6 +41,21 @@ enum SteamTouchSettings
     static var size: Double { UserDefaults.standard.double(forKey: "steam.cursor.size") }
     static var outlineWidth: Double { UserDefaults.standard.double(forKey: "steam.cursor.outlineWidth") }
 
+    /// Puts every cursor look/timing setting (everything except showing the cursor) back to its default.
+    static func resetCursor()
+    {
+        var keys = ["steam.cursor.fade", "steam.cursor.size", "steam.cursor.outlineWidth"]
+        for prefix in ["steam.cursor.fill", "steam.cursor.outline", "steam.cursor.pressedFill", "steam.cursor.pressedOutline"]
+        {
+            keys += ["r", "g", "b", "a"].map { prefix + "." + $0 }
+        }
+
+        for key in keys
+        {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
     static func color(_ prefix: String) -> UIColor
     {
         let d = UserDefaults.standard
@@ -277,6 +292,7 @@ struct SteamTouchscreenOptions: View
     @AppStorage("steam.touch.requirePress") private var requirePress = false
     @AppStorage("steam.touch.pressThreshold") private var threshold = 0.15
     @AppStorage("steam.cursor.enabled") private var cursorEnabled = true
+    @AppStorage("steam.cursor.advanced") private var showsAdvancedCursor = false
     @AppStorage("steam.cursor.fade") private var fade = 1.0
     @AppStorage("steam.cursor.size") private var size = 26.0
     @AppStorage("steam.cursor.outlineWidth") private var outlineWidth = 2.0
@@ -302,20 +318,29 @@ struct SteamTouchscreenOptions: View
 
             if cursorEnabled
             {
-                SteamSliderField(title: String(localized: "Fade Out Time"), value: $fade, sliderRange: 0...3, typedRange: 0...30, step: 0.05, scale: 1, unit: "s", decimals: 2)
-                SteamSliderField(title: String(localized: "Size"), value: $size, sliderRange: 8...80, typedRange: 2...300, step: 1, scale: 1, unit: "pt", decimals: 0)
-                SteamSliderField(title: String(localized: "Outline Width"), value: $outlineWidth, sliderRange: 0...8, typedRange: 0...40, step: 0.5, scale: 1, unit: "pt", decimals: 1)
+                Toggle("Advanced Cursor Settings", isOn: $showsAdvancedCursor)
 
-                SteamColorField(title: String(localized: "Fill Color"), prefix: "steam.cursor.fill", defaults: (1, 1, 1, 0.5))
-                SteamColorField(title: String(localized: "Outline Color"), prefix: "steam.cursor.outline", defaults: (0, 0, 0, 0.8))
-
-                if requirePress
+                if showsAdvancedCursor
                 {
-                    SteamColorField(title: String(localized: "Pressed Fill Color"), prefix: "steam.cursor.pressedFill", defaults: (1, 0.2, 0.2, 0.7))
-                    SteamColorField(title: String(localized: "Pressed Outline Color"), prefix: "steam.cursor.pressedOutline", defaults: (0.5, 0, 0, 0.9))
-                }
+                    SteamSliderField(title: String(localized: "Fade Out Time"), value: $fade, sliderRange: 0...3, typedRange: 0...30, step: 0.05, scale: 1, unit: "s", decimals: 2)
+                    SteamSliderField(title: String(localized: "Size"), value: $size, sliderRange: 8...80, typedRange: 2...300, step: 1, scale: 1, unit: "pt", decimals: 0)
+                    SteamSliderField(title: String(localized: "Outline Width"), value: $outlineWidth, sliderRange: 0...8, typedRange: 0...40, step: 0.5, scale: 1, unit: "pt", decimals: 1)
 
-                SteamCursorPreview(showsPressed: requirePress)
+                    SteamColorField(title: String(localized: "Fill Color"), prefix: "steam.cursor.fill", defaults: (1, 1, 1, 0.5))
+                    SteamColorField(title: String(localized: "Outline Color"), prefix: "steam.cursor.outline", defaults: (0, 0, 0, 0.8))
+
+                    if requirePress
+                    {
+                        SteamColorField(title: String(localized: "Pressed Fill Color"), prefix: "steam.cursor.pressedFill", defaults: (1, 0.2, 0.2, 0.7))
+                        SteamColorField(title: String(localized: "Pressed Outline Color"), prefix: "steam.cursor.pressedOutline", defaults: (0.5, 0, 0, 0.9))
+                    }
+
+                    SteamCursorPreview(showsPressed: requirePress)
+
+                    Button("Reset Cursor to Defaults", role: .destructive) {
+                        SteamTouchSettings.resetCursor()
+                    }
+                }
             }
         } header: {
             Text("Cursor")
