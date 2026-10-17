@@ -11,6 +11,7 @@
 import Foundation
 import CoreBluetooth
 import DeltaCore
+import MelonDSDeltaCore
 
 extension GameControllerInputType
 {
@@ -204,7 +205,14 @@ extension SteamInput
 final class SteamGameController: NSObject, GameController
 {
     let name = "Steam Controller"
-    var playerIndex: Int?
+    var playerIndex: Int? {
+        didSet {
+            // The controller also shows up as a keyboard on iPadOS. Once it is assigned to a player,
+            // take the keyboard away from every player. It can still be turned back on in Delta's settings.
+            if playerIndex != nil { SteamGameController.unassignKeyboards() }
+        }
+    }
+
     let inputType: GameControllerInputType = .steam
 
     // The core buttons start with Delta's stock layout. Extras are left unmapped until the user adds them.
@@ -217,6 +225,27 @@ final class SteamGameController: NSObject, GameController
     static let invertPadY = false
 
     private var active: [SteamInput: Double] = [:]
+    private var padWasTouching = [false, false]
+    private var padPressed = [false, false]
+
+    static func unassignKeyboards()
+    {
+        for case let keyboard as KeyboardGameController in ExternalGameControllerManager.shared.connectedControllers
+        {
+            keyboard.playerIndex = nil
+        }
+    }
+
+    /// Moves this controller to the lowest player slot nobody else is using (e.g. the keyboard's old slot).
+    func claimLowestFreePlayerIndex()
+    {
+        let taken = Set(ExternalGameControllerManager.shared.connectedControllers.filter { $0 !== self }.compactMap { $0.playerIndex })
+
+        var index = 0
+        while taken.contains(index) { index += 1 }
+
+        if let current = playerIndex, index < current { playerIndex = index }
+    }
 
     private static func makeDefaultMapping() -> GameControllerInputMappingProtocol?
     {
@@ -286,9 +315,9 @@ final class SteamGameController: NSObject, GameController
         addAxis(&want, Double(s16(13)) / 32767, negative: .rightThumbstickLeft, positive: .rightThumbstickRight)
         addAxis(&want, yFlip * Double(s16(15)) / 32767, negative: .rightThumbstickDown, positive: .rightThumbstickUp)
 
-        // Trackpad positions, only while a finger is on the pad.
-        if has(4, 0x02) { addPad(&want, x: s16(17), y: s16(19), xInput: .leftPadX, yInput: .leftPadY) }
-        if has(3, 0x20) { addPad(&want, x: s16(23), y: s16(25), xInput: .rightPadX, yInput: .rightPadY) }
+        // Trackpad positions (and the touchscreen cursor), only while a finger is on the pad.
+        handlePad(&want, index: 0, touching: has(4, 0x02), x: s16(17), y: s16(19), pressure: s16(21), xInput: .leftPadX, yInput: .leftPadY)
+        handlePad(&want, index: 1, touching: has(3, 0x20), x: s16(23), y: s16(25), pressure: s16(27), xInput: .rightPadX, yInput: .rightPadY)
 
         // Diff against what is currently pressed.
         for key in Set(want.keys).union(active.keys)
@@ -311,6 +340,13 @@ final class SteamGameController: NSObject, GameController
     {
         for key in active.keys { deactivate(key) }
         active.removeAll()
+
+        for index in 0..<2
+        {
+            padWasTouching[index] = false
+            padPressed[index] = false
+            SteamCursor.shared.release(source: index)
+        }
     }
 
     private func addAxis(_ want: inout [SteamInput: Double], _ raw: Double, negative: SteamInput, positive: SteamInput)
@@ -322,16 +358,69 @@ final class SteamGameController: NSObject, GameController
         if raw < 0 { want[negative] = scaled } else { want[positive] = scaled }
     }
 
-    private func addPad(_ want: inout [SteamInput: Double], x: Int, y: Int, xInput: SteamInput, yInput: SteamInput)
+    private func isMappedToTouchscreen(_ input: SteamInput) -> Bool
     {
-        let nx = min(1.0, max(0.0, (Double(x) + 32768) / 65535))
+        let touchX = MelonDSGameInput.touchScreenX.stringValue
+
+        for receiver in receivers
+        {
+            if let mapping = inputMapping(for: receiver), mapping.input(forControllerInput: input)?.stringValue == touchX
+            {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func handlePad(_ want: inout [SteamInput: Double], index: Int, touching: Bool, x: Int, y: Int, pressure: Int, xInput: SteamInput, yInput: SteamInput)
+    {
+        guard touching else
+        {
+            if padWasTouching[index]
+            {
+                padWasTouching[index] = false
+                padPressed[index] = false
+                SteamCursor.shared.release(source: index)
+            }
+            return
+        }
+
+        padWasTouching[index] = true
+
+        var nx = min(1.0, max(0.0, (Double(x) + 32768) / 65535))
         var ny = min(1.0, max(0.0, (Double(y) + 32768) / 65535))
 
         // Pad Y is up-positive; screens count down from the top.
         if !SteamGameController.invertPadY { ny = 1 - ny }
 
-        want[xInput] = nx
-        want[yInput] = ny
+        // Optionally use a 4:3 area of the (roughly square) pad so the DS screen isn't stretched.
+        if SteamTouchSettings.aspect43 { ny = min(1.0, max(0.0, (ny - 0.125) / 0.75)) }
+
+        nx = min(1.0, max(0.0, nx))
+
+        if isMappedToTouchscreen(xInput)
+        {
+            SteamCursor.shared.show(x: nx, y: ny, source: index)
+        }
+
+        var passes = true
+
+        if SteamTouchSettings.requirePress
+        {
+            let level = Double(max(0, pressure)) / 32767
+            let threshold = SteamTouchSettings.pressThreshold
+
+            // A little hysteresis so the touch doesn't flicker right at the threshold.
+            passes = padPressed[index] ? (level >= threshold * 0.8) : (level >= threshold)
+            padPressed[index] = passes
+        }
+
+        if passes
+        {
+            want[xInput] = nx
+            want[yInput] = ny
+        }
     }
 }
 
@@ -350,6 +439,15 @@ final class SteamController: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     func start()
     {
+        SteamTouchSettings.registerDefaults()
+
+        // If the keyboard (re)connects while the Steam Controller is in use, keep it unassigned.
+        NotificationCenter.default.addObserver(forName: .externalGameControllerDidConnect, object: nil, queue: .main) { [weak self] notification in
+            guard let keyboard = notification.object as? KeyboardGameController,
+                  let steam = self?.controller, steam.playerIndex != nil else { return }
+            keyboard.playerIndex = nil
+        }
+
         guard central == nil else { return }
         central = CBCentralManager(delegate: self, queue: .main)
     }
@@ -446,6 +544,7 @@ final class SteamController: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             let newController = SteamGameController()
             controller = newController
             ExternalGameControllerManager.shared.addExternal(newController)
+            newController.claimLowestFreePlayerIndex()
         }
 
         controller?.process(value)
