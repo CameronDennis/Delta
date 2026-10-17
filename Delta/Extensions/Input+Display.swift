@@ -287,6 +287,7 @@ extension Input
             case .toggleFastForward: return NSLocalizedString("Toggle Fast Forward", comment: "")
             case .reverseScreens: return NSLocalizedString("Reverse Screens", comment: "")
             case .screenshot: return NSLocalizedString("Screenshot", comment: "")
+            case .toggleFirmPress: return NSLocalizedString("Toggle Firm Press", comment: "")
             }
             
         default: break
@@ -432,6 +433,7 @@ extension Input
             case .toggleFastForward: return "forward"
             case .reverseScreens: return "rectangle.2.swap"
             case .screenshot: return "camera"
+            case .toggleFirmPress: return "hand.tap"
             }
             
         default: return "questionmark.circle"
