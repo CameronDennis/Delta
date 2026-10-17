@@ -80,7 +80,12 @@ final class SteamCursor
             return
         }
 
-        guard let (overlay, rect) = locateBottomScreen() else { return }
+        // Only draw the cursor while the game is actually running in the foreground.
+        guard let (overlay, rect) = locateBottomScreen() else
+        {
+            hideNow()
+            return
+        }
 
         self.source = source
         cursorView.layer.removeAllAnimations()
@@ -172,6 +177,23 @@ final class SteamCursor
         }
     }
 
+    /// True when the emulator behind this game view is running (not paused by the pause menu, a sheet, etc.).
+    private func isReceivingInput(_ gameView: GameView) -> Bool
+    {
+        var responder: UIResponder? = gameView
+        while let current = responder
+        {
+            if let viewController = current as? DeltaCore.GameViewController
+            {
+                return viewController.emulatorCore?.state == .running
+            }
+
+            responder = current.next
+        }
+
+        return true
+    }
+
     /// The crop rectangle (in the DS frame, top-left origin) that a game view applies, if any.
     private func cropRect(of gameView: GameView) -> CGRect?
     {
@@ -205,6 +227,7 @@ final class SteamCursor
     private func locateBottomScreen() -> (CursorWindow, CGRect)?
     {
         guard let overlay = makeWindowIfNeeded(), let scene = overlay.windowScene else { return nil }
+        guard UIApplication.shared.applicationState == .active, scene.activationState == .foregroundActive else { return nil }
 
         var gameViews = [GameView]()
         for window in scene.windows where window !== overlay
@@ -216,6 +239,7 @@ final class SteamCursor
         for gameView in gameViews
         {
             guard let window = gameView.window, gameView.bounds.width > 10, gameView.bounds.height > 10 else { continue }
+            guard isReceivingInput(gameView) else { continue }
             let windowRect = window.convert(gameView.bounds, from: gameView)
             entries.append((frame: overlay.convert(windowRect, from: window), crop: cropRect(of: gameView)))
         }
