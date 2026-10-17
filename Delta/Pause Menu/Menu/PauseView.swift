@@ -18,6 +18,7 @@ extension PauseView
     {
         var resumeHandler: () -> Void = {}
         var stopHandler: () -> Void = {}
+        var controllerHandler: (() -> Void)?
         
         fileprivate private(set) var isHidden: Bool = true
         fileprivate private(set) var isAnimated: Bool = true
@@ -32,14 +33,15 @@ extension PauseView
             fatalError("init(coder:) has not been implemented")
         }
         
-        init(items: [MenuItem], resumeHandler: @escaping () -> Void = {}, stopHandler: @escaping () -> Void = {})
+        init(items: [MenuItem], resumeHandler: @escaping () -> Void = {}, stopHandler: @escaping () -> Void = {}, controllerHandler: (() -> Void)? = nil)
         {
             self.resumeHandler = resumeHandler
             self.stopHandler = stopHandler
+            self.controllerHandler = controllerHandler
             
             super.init(rootView: AnyView(EmptyView()))
             
-            let pauseView = PauseView(items: items, resumeHandler: resumeHandler, stopHandler: stopHandler).environment(self)
+            let pauseView = PauseView(items: items, resumeHandler: resumeHandler, stopHandler: stopHandler, controllerHandler: controllerHandler).environment(self)
             self.rootView = AnyView(pauseView)
         }
         
@@ -72,6 +74,7 @@ struct PauseView: View
     
     var resumeHandler: () -> Void = {}
     var stopHandler: () -> Void = {}
+    var controllerHandler: (() -> Void)?
     
     @Environment(HostingController.self)
     private var hostingViewController
@@ -93,6 +96,13 @@ struct PauseView: View
                 Label("Main Menu", systemImage: "house.fill")
             }
         }
+    }
+    
+    // Inverse of the Resume button's purple.
+    private var controllerTint: Color {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor.deltaPurple.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return Color(uiColor: UIColor(red: 1 - r, green: 1 - g, blue: 1 - b, alpha: 1))
     }
     
     var body: some View {
@@ -128,6 +138,16 @@ struct PauseView: View
                             .glassEffectTransition(.materialize)
                     }
 
+                    if let controllerHandler
+                    {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Controller", systemImage: "gamecontroller", role: .confirm, action: controllerHandler)
+                                .tint(controllerTint)
+                                .glassEffect()
+                                .glassEffectTransition(.materialize)
+                        }
+                    }
+
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Resume", systemImage: "play.fill", role: .confirm, action: resumeHandler)
                             .tint(Color(uiColor: .deltaPurple))
@@ -142,6 +162,14 @@ struct PauseView: View
                     stopButton
                         .glassEffect()
                         .glassEffectTransition(.materialize)
+                    
+                    if let controllerHandler
+                    {
+                        Button("Controller", systemImage: "gamecontroller", role: .confirm, action: controllerHandler)
+                            .glassEffect()
+                            .tint(controllerTint)
+                            .glassEffectTransition(.materialize)
+                    }
                     
                     Spacer()
                     
