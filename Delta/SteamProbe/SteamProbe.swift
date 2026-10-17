@@ -2,15 +2,24 @@
 //  SteamProbe.swift
 //
 //  Debug overlay for the Steam Controller experiment. Shows a floating "SC" button on top of
-//  every screen; tapping it opens a log of everything the iPad can see about the controller:
-//    - GameController framework: gamepads, keyboards, mice
-//    - CoreBluetooth: anything named like a Steam Controller, with all of its GATT services,
-//      characteristics, and live notification bytes.
+//  every screen; tapping it opens a panel with:
+//    - Scan BLE: finds the controller, connects, and subscribes to every characteristic.
+//    - Wizard: a timed, hands-on-controller walkthrough that records which bits of the
+//      controller's 45-byte state report change for each button, stick, trigger and pad,
+//      then prints compact RESULT lines you can copy back.
+//    - Copy results / Copy all: put the RESULT lines (or the whole log) on the clipboard.
+//
+//  Characteristic roles seen so far (service 100F6C32-...):
+//    100F6C7A  45-byte controller state (buttons, triggers, sticks, pads, IMU)
+//    100F6C76  8-byte keyboard-style report (the controller's "lizard mode")
+//    100F6C75  5-byte mouse-style report (lizard mode)
+//    100F6C78  14-byte periodic status
 //
 
 import UIKit
 import CoreBluetooth
 import GameController
+import AudioToolbox
 
 final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 {
@@ -19,8 +28,10 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     private var window: PassthroughWindow?
     private let panel = UIView()
     private let textView = UITextView()
+    private let promptLabel = UILabel()
 
     private var lines: [String] = []
+    private var resultLines: [String] = []
     private var refreshPending = false
     private var installed = false
 
@@ -30,6 +41,48 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     private var unnamedCount = 0
     private var notifyCounts: [String: Int] = [:]
     private var mouseMoveCount = 0
+    private var statePacketCount = 0
+
+    // Wizard state
+    private var wizardRunning = false
+    private var wizardToken = 0
+    private var stats = StepStats()
+    private var idleCounts = [Int](repeating: 0, count: 32)
+    private var idlePackets = 0
+    private let stepSeconds: Double = 4.5
+
+    private let wizardSteps: [(name: String, hint: String)] = [
+        ("IDLE", "Hold the controller normally. Press NOTHING."),
+        ("DPAD UP", "Press and HOLD D-pad UP, then release."),
+        ("DPAD DOWN", "Press and HOLD D-pad DOWN, then release."),
+        ("DPAD LEFT", "Press and HOLD D-pad LEFT, then release."),
+        ("DPAD RIGHT", "Press and HOLD D-pad RIGHT, then release."),
+        ("A", "Press and HOLD A, then release."),
+        ("B", "Press and HOLD B, then release."),
+        ("X", "Press and HOLD X, then release."),
+        ("Y", "Press and HOLD Y, then release."),
+        ("L1", "Press and HOLD the LEFT bumper (L1)."),
+        ("R1", "Press and HOLD the RIGHT bumper (R1)."),
+        ("L2", "Pull the LEFT trigger (L2) all the way in and hold."),
+        ("R2", "Pull the RIGHT trigger (R2) all the way in and hold."),
+        ("L3", "Push the LEFT stick straight DOWN into a click and hold."),
+        ("R3", "Push the RIGHT stick straight DOWN into a click and hold."),
+        ("LEFT STICK", "Roll the LEFT stick around its edge. NO click."),
+        ("RIGHT STICK", "Roll the RIGHT stick around its edge. NO click."),
+        ("L4", "Press and HOLD back button L4."),
+        ("L5", "Press and HOLD back button L5."),
+        ("R4", "Press and HOLD back button R4."),
+        ("R5", "Press and HOLD back button R5."),
+        ("LEFT PAD TOUCH", "Touch the LEFT trackpad lightly and slide. NO click."),
+        ("LEFT PAD CLICK", "Press the LEFT trackpad down into a click and hold."),
+        ("RIGHT PAD TOUCH", "Touch the RIGHT trackpad lightly and slide. NO click."),
+        ("RIGHT PAD CLICK", "Press the RIGHT trackpad down into a click and hold."),
+        ("STEAM", "TAP the Steam button once (do not hold it)."),
+        ("MENU", "Press and HOLD the Menu / Start button."),
+        ("VIEW", "Press and HOLD the View / Select button."),
+        ("EXTRA", "Press any other button not done yet (quick access, etc.)."),
+        ("PUT DOWN", "Put the controller DOWN on a table. Hands off."),
+    ]
 
     private let steamKeywords = ["steam", "valve", "triton", "proteus", "nereid"]
 
@@ -38,6 +91,20 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         f.dateFormat = "HH:mm:ss.SSS"
         return f
     }()
+
+    private struct StepStats
+    {
+        var packets = 0
+        var bitCounts = [Int](repeating: 0, count: 32)
+        var maxTL = 0
+        var maxTR = 0
+        var lsMinX = 0, lsMaxX = 0, lsMinY = 0, lsMaxY = 0
+        var rsMinX = 0, rsMaxX = 0, rsMinY = 0, rsMaxY = 0
+        var lpAbsX = 0, lpAbsY = 0, lpPressure = 0
+        var rpAbsX = 0, rpAbsY = 0, rpPressure = 0
+        var keys = Set<UInt8>()
+        var mouseButtons = Set<UInt8>()
+    }
 
     // MARK: - Install
 
@@ -65,6 +132,7 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         let button = UIButton(type: .system, primaryAction: UIAction(title: title) { _ in action() })
         button.backgroundColor = UIColor.white.withAlphaComponent(0.15)
         button.setTitleColor(.white, for: .normal)
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
         button.layer.cornerRadius = 6
         return button
     }
@@ -90,21 +158,30 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         panel.translatesAutoresizingMaskIntoConstraints = false
 
         let scanButton = makeButton("Scan BLE") { [weak self] in self?.startBluetooth() }
-        let copyButton = makeButton("Copy log") { [weak self] in
+        let wizardButton = makeButton("Wizard") { [weak self] in self?.toggleWizard() }
+        let copyResultsButton = makeButton("Copy results") { [weak self] in
+            guard let self = self else { return }
+            let text = self.resultLines.isEmpty ? self.lines.joined(separator: "\n") : self.resultLines.joined(separator: "\n")
+            UIPasteboard.general.string = text
+            self.log("Copied \(self.resultLines.isEmpty ? self.lines.count : self.resultLines.count) line(s) to clipboard")
+        }
+        let copyAllButton = makeButton("Copy all") { [weak self] in
             guard let self = self else { return }
             UIPasteboard.general.string = self.lines.joined(separator: "\n")
-            self.log("Log copied to clipboard (\(self.lines.count) lines)")
-        }
-        let clearButton = makeButton("Clear") { [weak self] in
-            self?.lines.removeAll()
-            self?.refreshText()
+            self.log("Copied entire log (\(self.lines.count) lines) to clipboard")
         }
 
-        let stack = UIStackView(arrangedSubviews: [scanButton, copyButton, clearButton])
+        let stack = UIStackView(arrangedSubviews: [scanButton, wizardButton, copyResultsButton, copyAllButton])
         stack.axis = .horizontal
         stack.distribution = .fillEqually
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        promptLabel.text = "Wizard idle. Tap Scan BLE, then Wizard."
+        promptLabel.numberOfLines = 2
+        promptLabel.font = UIFont.boldSystemFont(ofSize: 17)
+        promptLabel.textColor = UIColor.systemYellow
+        promptLabel.translatesAutoresizingMaskIntoConstraints = false
 
         textView.isEditable = false
         textView.backgroundColor = .clear
@@ -113,6 +190,7 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         textView.translatesAutoresizingMaskIntoConstraints = false
 
         panel.addSubview(stack)
+        panel.addSubview(promptLabel)
         panel.addSubview(textView)
         root.view.addSubview(panel)
         root.view.addSubview(toggle)
@@ -127,14 +205,18 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             panel.topAnchor.constraint(equalTo: toggle.bottomAnchor, constant: 6),
             panel.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 8),
             panel.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -8),
-            panel.heightAnchor.constraint(equalTo: root.view.heightAnchor, multiplier: 0.55),
+            panel.heightAnchor.constraint(equalTo: root.view.heightAnchor, multiplier: 0.6),
 
             stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: 8),
             stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
             stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -8),
             stack.heightAnchor.constraint(equalToConstant: 32),
 
-            textView.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 6),
+            promptLabel.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 8),
+            promptLabel.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 10),
+            promptLabel.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -10),
+
+            textView.topAnchor.constraint(equalTo: promptLabel.bottomAnchor, constant: 6),
             textView.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 6),
             textView.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -6),
             textView.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -6),
@@ -155,7 +237,7 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     private func log(_ message: String)
     {
         lines.append("\(formatter.string(from: Date())) \(message)")
-        if lines.count > 400 { lines.removeFirst(lines.count - 400) }
+        if lines.count > 600 { lines.removeFirst(lines.count - 600) }
 
         guard !refreshPending else { return }
         refreshPending = true
@@ -176,6 +258,187 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     {
         let bytes = data.prefix(64).map { String(format: "%02x", $0) }.joined(separator: " ")
         return data.count > 64 ? "\(bytes) ... (\(data.count) bytes)" : "\(bytes) (\(data.count) bytes)"
+    }
+
+    // MARK: - Wizard
+
+    private func toggleWizard()
+    {
+        if wizardRunning
+        {
+            wizardToken += 1
+            wizardRunning = false
+            promptLabel.text = "Wizard cancelled."
+            log("Wizard cancelled")
+            return
+        }
+
+        guard statePacketCount > 0 else
+        {
+            promptLabel.text = "No controller data yet. Tap Scan BLE first."
+            log("Wizard: no controller data yet. Tap Scan BLE first.")
+            return
+        }
+
+        wizardRunning = true
+        wizardToken += 1
+        resultLines.removeAll()
+        idleCounts = [Int](repeating: 0, count: 32)
+        idlePackets = 0
+        log("Wizard started: \(wizardSteps.count) steps, \(stepSeconds) s each. Hold the controller and follow the prompts.")
+        runStep(0, token: wizardToken)
+    }
+
+    private func runStep(_ index: Int, token: Int)
+    {
+        guard token == wizardToken else { return }
+
+        stats = StepStats()
+        promptLabel.text = "\(index + 1)/\(wizardSteps.count)  \(wizardSteps[index].hint)"
+        AudioServicesPlaySystemSound(1104)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + stepSeconds) { [weak self] in
+            guard let self = self, token == self.wizardToken else { return }
+            self.finishStep(index)
+
+            if index + 1 < self.wizardSteps.count
+            {
+                self.runStep(index + 1, token: token)
+            }
+            else
+            {
+                self.wizardRunning = false
+                self.promptLabel.text = "Wizard done. Tap Copy results and paste it to Claude."
+                AudioServicesPlaySystemSound(1105)
+                self.log("Wizard finished (\(self.resultLines.count) result lines)")
+            }
+        }
+    }
+
+    private func bitName(_ bit: Int) -> String
+    {
+        return String(format: "i%d:%02x", Int32(1 + bit / 8), UInt32(1 << (bit % 8)))
+    }
+
+    private func finishStep(_ index: Int)
+    {
+        let s = stats
+        let name = wizardSteps[index].name
+        var parts: [String] = ["RESULT [\(name)] n=\(s.packets)"]
+
+        if index == 0
+        {
+            idleCounts = s.bitCounts
+            idlePackets = s.packets
+            let on = (0..<32).filter { s.bitCounts[$0] * 2 > s.packets }.map { bitName($0) }
+            parts.append("baseline-on=" + (on.isEmpty ? "-" : on.joined(separator: ",")))
+        }
+        else
+        {
+            var added: [String] = []
+            var cleared: [String] = []
+            for bit in 0..<32
+            {
+                let idleFraction = idlePackets > 0 ? Double(idleCounts[bit]) / Double(idlePackets) : 0
+                let fraction = s.packets > 0 ? Double(s.bitCounts[bit]) / Double(s.packets) : 0
+                if s.bitCounts[bit] >= 4 && idleFraction < 0.2 { added.append(bitName(bit)) }
+                if idleFraction > 0.8 && fraction < 0.2 { cleared.append(bitName(bit)) }
+            }
+            parts.append("new=" + (added.isEmpty ? "-" : added.joined(separator: ",")))
+            parts.append("off=" + (cleared.isEmpty ? "-" : cleared.joined(separator: ",")))
+        }
+
+        if s.maxTL > 1000 { parts.append("TL=\(s.maxTL)") }
+        if s.maxTR > 1000 { parts.append("TR=\(s.maxTR)") }
+        if max(abs(s.lsMinX), s.lsMaxX, abs(s.lsMinY), s.lsMaxY) > 5000
+        {
+            parts.append("LS x[\(s.lsMinX),\(s.lsMaxX)] y[\(s.lsMinY),\(s.lsMaxY)]")
+        }
+        if max(abs(s.rsMinX), s.rsMaxX, abs(s.rsMinY), s.rsMaxY) > 5000
+        {
+            parts.append("RS x[\(s.rsMinX),\(s.rsMaxX)] y[\(s.rsMinY),\(s.rsMaxY)]")
+        }
+        if s.lpPressure > 0 || s.lpAbsX > 0 || s.lpAbsY > 0
+        {
+            parts.append("LP x\(s.lpAbsX) y\(s.lpAbsY) p\(s.lpPressure)")
+        }
+        if s.rpPressure > 0 || s.rpAbsX > 0 || s.rpAbsY > 0
+        {
+            parts.append("RP x\(s.rpAbsX) y\(s.rpAbsY) p\(s.rpPressure)")
+        }
+        if !s.keys.isEmpty
+        {
+            parts.append("kbd=" + s.keys.sorted().map { String(format: "%02x", $0) }.joined(separator: ","))
+        }
+        if !s.mouseButtons.isEmpty
+        {
+            parts.append("mouseBtn=" + s.mouseButtons.sorted().map { String(format: "%02x", $0) }.joined(separator: ","))
+        }
+
+        let line = parts.joined(separator: " ")
+        resultLines.append(line)
+        log(line)
+    }
+
+    // MARK: - Report decoding
+
+    private func s16(_ data: Data, _ index: Int) -> Int
+    {
+        let lo = UInt16(data[data.startIndex + index])
+        let hi = UInt16(data[data.startIndex + index + 1])
+        return Int(Int16(bitPattern: lo | (hi << 8)))
+    }
+
+    private func handleState(_ data: Data)
+    {
+        guard data.count >= 29 else { return }
+        statePacketCount += 1
+        guard wizardRunning else { return }
+
+        stats.packets += 1
+        for byteIndex in 0..<4
+        {
+            let value = data[data.startIndex + 1 + byteIndex]
+            for bit in 0..<8 where (value >> UInt8(bit)) & 1 == 1
+            {
+                stats.bitCounts[byteIndex * 8 + bit] += 1
+            }
+        }
+
+        stats.maxTL = max(stats.maxTL, s16(data, 5))
+        stats.maxTR = max(stats.maxTR, s16(data, 7))
+
+        let lsx = s16(data, 9), lsy = s16(data, 11)
+        stats.lsMinX = min(stats.lsMinX, lsx); stats.lsMaxX = max(stats.lsMaxX, lsx)
+        stats.lsMinY = min(stats.lsMinY, lsy); stats.lsMaxY = max(stats.lsMaxY, lsy)
+
+        let rsx = s16(data, 13), rsy = s16(data, 15)
+        stats.rsMinX = min(stats.rsMinX, rsx); stats.rsMaxX = max(stats.rsMaxX, rsx)
+        stats.rsMinY = min(stats.rsMinY, rsy); stats.rsMaxY = max(stats.rsMaxY, rsy)
+
+        stats.lpAbsX = max(stats.lpAbsX, abs(s16(data, 17)))
+        stats.lpAbsY = max(stats.lpAbsY, abs(s16(data, 19)))
+        stats.lpPressure = max(stats.lpPressure, s16(data, 21))
+        stats.rpAbsX = max(stats.rpAbsX, abs(s16(data, 23)))
+        stats.rpAbsY = max(stats.rpAbsY, abs(s16(data, 25)))
+        stats.rpPressure = max(stats.rpPressure, s16(data, 27))
+    }
+
+    private func handleKeys(_ data: Data)
+    {
+        guard wizardRunning, data.count >= 8 else { return }
+        for index in 2..<8
+        {
+            let key = data[data.startIndex + index]
+            if key != 0 { stats.keys.insert(key) }
+        }
+    }
+
+    private func handleMouse(_ data: Data)
+    {
+        guard wizardRunning, data.count >= 1 else { return }
+        let buttons = data[data.startIndex]
+        if buttons != 0 { stats.mouseButtons.insert(buttons) }
     }
 
     // MARK: - GameController framework
@@ -309,7 +572,7 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         seen.removeAll()
         unnamedCount = 0
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
-        log("BLE: scanning for 25 s. Put the controller in Bluetooth pairing mode now.")
+        log("BLE: scanning for 25 s. Put the controller in Bluetooth mode now.")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
             guard let self = self, let central = self.central, central.isScanning else { return }
@@ -384,6 +647,7 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     {
         log("BLE: disconnected: \(error?.localizedDescription ?? "no error")")
         peripherals[peripheral.identifier] = nil
+        statePacketCount = 0
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?)
@@ -443,7 +707,18 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
         guard let value = characteristic.value else { return }
 
-        let key = characteristic.uuid.uuidString
+        let key = characteristic.uuid.uuidString.uppercased()
+
+        // Route the controller's reports to the decoders.
+        var isStream = false
+        if key.hasPrefix("100F6C7A") { handleState(value); isStream = true }
+        else if key.hasPrefix("100F6C76") { handleKeys(value); isStream = true }
+        else if key.hasPrefix("100F6C75") { handleMouse(value); isStream = true }
+        else if key.hasPrefix("100F6C78") || key.hasPrefix("100F6C77") || key.hasPrefix("100F6C79") { isStream = true }
+
+        // Keep the log quiet while the wizard is recording.
+        if wizardRunning && isStream { return }
+
         let count = (notifyCounts[key] ?? 0) + 1
         notifyCounts[key] = count
 
