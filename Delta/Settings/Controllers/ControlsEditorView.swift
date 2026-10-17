@@ -269,8 +269,8 @@ private struct SteamMappingSections: View
         if editor.system == .ds
         {
             Section {
-                SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY, disables: [.leftPadClick, .leftPadTouch])
-                SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY, disables: [.rightPadClick, .rightPadTouch])
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY)
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY)
             } header: {
                 Text("Touchscreen")
             } footer: {
@@ -291,7 +291,6 @@ private struct SteamTouchscreenToggle: View
     let title: String
     let xInput: SteamInput
     let yInput: SteamInput
-    let disables: [SteamInput]
     
     var isOn: Binding<Bool> {
         Binding(
@@ -303,15 +302,7 @@ private struct SteamTouchscreenToggle: View
                 let touchY: Input? = newValue ? MelonDSGameInput.touchScreenY : nil
                 editor.inputMapping.set(touchX, forControllerInput: xInput)
                 editor.inputMapping.set(touchY, forControllerInput: yInput)
-                
-                // The pad can't be both a touchscreen and buttons.
-                if newValue
-                {
-                    for input in disables
-                    {
-                        editor.inputMapping.set(nil, forControllerInput: input)
-                    }
-                }
+
             }
         )
     }
