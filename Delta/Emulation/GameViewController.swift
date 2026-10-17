@@ -337,6 +337,7 @@ class GameViewController: DeltaCore.GameViewController
             case .fastForward: self.performFastForwardAction(activate: true)
             case .reverseScreens: self.performReverseScreensAction()
             case .screenshot: self.performScreenshotAction()
+            case .toggleFirmPress: SteamTouchSettings.toggleRequirePress()
             case .toggleFastForward:
                 let isFastForwarding = (emulatorCore.rate != emulatorCore.deltaCore.supportedRates.lowerBound)
                 self.performFastForwardAction(activate: !isFastForwarding)
@@ -390,6 +391,7 @@ class GameViewController: DeltaCore.GameViewController
             case .toggleFastForward: break
             case .reverseScreens: break
             case .screenshot: break
+            case .toggleFirmPress: break
             }
         }
     }
