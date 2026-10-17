@@ -349,6 +349,12 @@ private struct InputMappingRow: View
     // AnyInput because the picker requires a Hashable type.
     static let actionInputs: [AnyInput] = [ActionInput.quickSave, .quickLoad, .fastForward, .screenshot].map(AnyInput.init)
     
+    // The Steam Controller can also toggle its firm-press-to-touch setting.
+    var availableActionInputs: [AnyInput] {
+        let steamActions = (editor.controller.inputType == .steam) ? [AnyInput(ActionInput.toggleFirmPress)] : []
+        return Self.actionInputs + steamActions
+    }
+    
     // The inputs that can be mapped to: this system's game inputs, plus Menu (pause).
     var mappableInputs: [AnyInput] {
         editor.system.editorInputs.map(AnyInput.init) + [AnyInput(StandardGameControllerInput.menu)]
@@ -441,7 +447,7 @@ private struct InputMappingRow: View
         }
         
         Section("Game Actions") {
-            ForEach(Self.actionInputs, id: \.self) { input in
+            ForEach(availableActionInputs, id: \.self) { input in
                 Label(input.localizedDisplayName, systemImage: input.sfSymbolName)
                     .tint(.accentColor)
                     .tag(AnyInput?.some(input))
