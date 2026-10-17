@@ -263,7 +263,7 @@ private struct SteamSliderField: View
     let unit: String
     let decimals: Int
 
-    @State private var text = ""
+    @SwiftUI.State private var text = ""
     @FocusState private var isFocused: Bool
 
     private func format(_ value: Double) -> String
