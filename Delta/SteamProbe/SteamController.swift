@@ -399,11 +399,6 @@ final class SteamGameController: NSObject, GameController
 
         nx = min(1.0, max(0.0, nx))
 
-        if isMappedToTouchscreen(xInput)
-        {
-            SteamCursor.shared.show(x: nx, y: ny, source: index)
-        }
-
         var passes = true
 
         if SteamTouchSettings.requirePress
@@ -414,6 +409,12 @@ final class SteamGameController: NSObject, GameController
             // A little hysteresis so the touch doesn't flicker right at the threshold.
             passes = padPressed[index] ? (level >= threshold * 0.8) : (level >= threshold)
             padPressed[index] = passes
+        }
+
+        if isMappedToTouchscreen(xInput)
+        {
+            // With a firm press required, the cursor changes color once the touch is actually sent.
+            SteamCursor.shared.show(x: nx, y: ny, source: index, pressed: SteamTouchSettings.requirePress && passes)
         }
 
         if passes
