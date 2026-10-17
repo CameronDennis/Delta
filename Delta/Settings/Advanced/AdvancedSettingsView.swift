@@ -17,6 +17,9 @@ struct AdvancedSettingsView: View
     @AppStorage(Settings.Name.pauseWhileInactive.rawValue)
     private var pauseWhileInactive: Bool = true
 
+    @AppStorage("steam.debugOverlay")
+    private var steamDebugOverlay: Bool = false
+
     var body: some View {
         Form {
             if UIApplication.shared.supportsMultipleScenes
@@ -46,6 +49,12 @@ struct AdvancedSettingsView: View
             
             Section {
                 ExportLogRow()
+            }
+
+            Section {
+                Toggle("Steam Controller Debug", isOn: $steamDebugOverlay)
+            } footer: {
+                Text("Shows the \"SC\" overlay for inspecting Steam Controller Bluetooth data.")
             }
         }
         .tint(.accentColor)
