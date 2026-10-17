@@ -125,6 +125,10 @@ struct ControlsEditorView: View
             {
                 KeyboardMappingSections(editor: editor)
             }
+            else if editor.controller.inputType == .steam
+            {
+                SteamMappingSections(editor: editor)
+            }
             else
             {
                 MFiMappingSections(editor: editor)
@@ -233,6 +237,97 @@ private struct KeyboardMappingSections: View
     }
 }
 
+// MARK: - Steam Controller -
+
+private struct SteamMappingSections: View
+{
+    let editor: ControlsEditor
+    
+    var mappedStrings: Set<String> {
+        Set(editor.inputMapping.supportedControllerInputs.map(\.stringValue))
+    }
+    
+    var mappedExtras: [Input] {
+        SteamInput.extras.filter { mappedStrings.contains($0.stringValue) }
+    }
+    
+    var body: some View {
+        ForEach(InputSection.steamSections, id: \.name) { section in
+            Section(section.name) {
+                ForEach(section.inputs, id: \.stringValue) { input in
+                    InputMappingRow(editor: editor, controllerInput: input)
+                }
+            }
+        }
+        
+        Section(String(localized: "Extra Buttons")) {
+            ForEach(mappedExtras, id: \.stringValue) { input in
+                InputMappingRow(editor: editor, controllerInput: input)
+            }
+            .onDelete { offsets in
+                let inputs = offsets.map { mappedExtras[$0] }
+                for input in inputs
+                {
+                    editor.inputMapping.set(nil, forControllerInput: input)
+                }
+            }
+            
+            Menu {
+                let available = SteamInput.extras.filter { !mappedStrings.contains($0.stringValue) }
+                
+                ForEach(available, id: \.stringValue) { input in
+                    Button(input.localizedDisplayName) {
+                        if let defaultInput = editor.system.editorInputs.first
+                        {
+                            editor.inputMapping.set(defaultInput, forControllerInput: input)
+                        }
+                    }
+                }
+            } label: {
+                Label("Add Button", systemImage: "plus")
+            }
+        }
+        
+        if editor.system == .ds
+        {
+            Section {
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY)
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY)
+            } header: {
+                Text("Touchscreen")
+            } footer: {
+                Text("The whole trackpad maps to the bottom screen. Touch to tap, slide to drag.")
+            }
+        }
+    }
+}
+
+private struct SteamTouchscreenToggle: View
+{
+    let editor: ControlsEditor
+    let title: String
+    let xInput: SteamInput
+    let yInput: SteamInput
+    
+    var isOn: Binding<Bool> {
+        Binding(
+            get: {
+                editor.inputMapping.input(forControllerInput: xInput)?.stringValue == MelonDSGameInput.touchScreenX.stringValue
+            },
+            set: { newValue in
+                let touchX: Input? = newValue ? MelonDSGameInput.touchScreenX : nil
+                let touchY: Input? = newValue ? MelonDSGameInput.touchScreenY : nil
+                editor.inputMapping.set(touchX, forControllerInput: xInput)
+                editor.inputMapping.set(touchY, forControllerInput: yInput)
+            }
+        )
+    }
+    
+    var body: some View {
+        Toggle(title, isOn: isOn)
+    }
+}
+
 // MARK: - Components -
 
 private struct InputSection
@@ -244,6 +339,12 @@ private struct InputSection
         InputSection(name: String(localized: "Buttons"), inputs: [MFiGameController.Input.a, .b, .x, .y, .up, .down, .left, .right, .leftShoulder, .leftTrigger, .rightShoulder, .rightTrigger, .start, .select, .menu]),
         InputSection(name: String(localized: "Left Thumbstick"), inputs: [MFiGameController.Input.leftThumbstickUp, .leftThumbstickDown, .leftThumbstickLeft, .leftThumbstickRight]),
         InputSection(name: String(localized: "Right Thumbstick"), inputs: [MFiGameController.Input.rightThumbstickUp, .rightThumbstickDown, .rightThumbstickLeft, .rightThumbstickRight])
+    ]
+    
+    static let steamSections: [InputSection] = [
+        InputSection(name: String(localized: "Buttons"), inputs: SteamInput.buttons),
+        InputSection(name: String(localized: "Left Thumbstick"), inputs: SteamInput.leftThumbstick),
+        InputSection(name: String(localized: "Right Thumbstick"), inputs: SteamInput.rightThumbstick)
     ]
     
     static let keyboardSections: [InputSection] = [
@@ -325,15 +426,8 @@ private struct InputMappingRow: View
     var mappedInput: Binding<AnyInput?> {
         Binding(
             get: {
-                let current = editor.normalizedInput(editor.inputMapping.input(forControllerInput: controllerInput))
-                
-                // Keyboard rows always show their mapped input; controller rows collapse to "Default" when unchanged.
-                if controllerInput.type != .controller(.keyboard), current == editor.normalizedInput(defaultInput)
-                {
-                    return nil
-                }
-                
-                return current
+                // Always show what the input is bound to (instead of collapsing to "Default").
+                return editor.normalizedInput(editor.inputMapping.input(forControllerInput: controllerInput))
             },
             set: { newValue in
                 editor.inputMapping.set(newValue ?? defaultInput, forControllerInput: controllerInput)
