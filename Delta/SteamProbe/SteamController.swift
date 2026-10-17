@@ -302,10 +302,13 @@ final class SteamGameController: NSObject, GameController
         if has(3, 0x04) { want[.l5] = 1 }
         if has(1, 0x80) { want[.r4] = 1 }
         if has(2, 0x01) { want[.r5] = 1 }
-        if has(4, 0x04) { want[.leftPadClick] = 1 }
-        if has(3, 0x40) { want[.rightPadClick] = 1 }
-        if has(4, 0x02) { want[.leftPadTouch] = 1 }
-        if has(3, 0x20) { want[.rightPadTouch] = 1 }
+        // A trackpad acting as the touchscreen ignores its click/touch bindings (they are kept, just inactive).
+        let leftIsTouchscreen = isMappedToTouchscreen(.leftPadX)
+        let rightIsTouchscreen = isMappedToTouchscreen(.rightPadX)
+        if has(4, 0x04), !leftIsTouchscreen { want[.leftPadClick] = 1 }
+        if has(3, 0x40), !rightIsTouchscreen { want[.rightPadClick] = 1 }
+        if has(4, 0x02), !leftIsTouchscreen { want[.leftPadTouch] = 1 }
+        if has(3, 0x20), !rightIsTouchscreen { want[.rightPadTouch] = 1 }
         if has(1, 0x10) { want[.quickAccess] = 1 }
 
         // Sticks
