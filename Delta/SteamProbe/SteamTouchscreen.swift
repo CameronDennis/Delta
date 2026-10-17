@@ -56,6 +56,12 @@ enum SteamTouchSettings
         }
     }
 
+    /// Flips "Require Firm Press to Touch" (bound to a game action so it can be toggled mid-game).
+    static func toggleRequirePress()
+    {
+        UserDefaults.standard.set(!requirePress, forKey: "steam.touch.requirePress")
+    }
+
     static func color(_ prefix: String) -> UIColor
     {
         let d = UserDefaults.standard
