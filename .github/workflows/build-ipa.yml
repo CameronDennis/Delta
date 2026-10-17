@@ -79,6 +79,49 @@ jobs:
           end
           RUBY
 
+      - name: Add Steam Controller integration
+        run: |
+          ruby <<'RUBY'
+          require 'xcodeproj'
+          proj = Xcodeproj::Project.open('Delta.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'Delta' }
+          abort 'Delta target not found' unless target
+          path = 'Delta/SteamProbe/SteamController.swift'
+          abort "#{path} is missing" unless File.exist?(path)
+          already = target.source_build_phase.files_references.compact.any? { |r| r.path.to_s.end_with?('SteamController.swift') }
+          unless already
+            ref = proj.main_group.new_reference(path)
+            target.add_file_references([ref])
+            proj.save
+            puts "Added #{path} to target Delta"
+          end
+          app = 'Delta/AppDelegate.swift'
+          src = File.read(app)
+          unless src.include?('SteamController.shared.start()')
+            abort 'probe hook not found' unless src.include?('SteamProbe.shared.install()')
+            File.write(app, src.sub('SteamProbe.shared.install()', "SteamProbe.shared.install()\n        SteamController.shared.start()"))
+            puts 'Patched AppDelegate for SteamController'
+          end
+          RUBY
+
+          # DeltaCore keeps controller registration private; add a small public doorway.
+          F=$(find . -name ExternalGameControllerManager.swift -path '*DeltaCore*' | head -n 1)
+          test -n "$F" || { echo 'ExternalGameControllerManager.swift not found'; exit 1; }
+          echo "Patching $F"
+          cat >> "$F" <<'SWIFT'
+
+          public extension ExternalGameControllerManager
+          {
+              func addExternal(_ controller: GameController) { self.add(controller) }
+              func removeExternal(_ controller: GameController) { self.remove(controller) }
+
+              var mfiDefaultInputMapping: GameControllerInputMappingProtocol? {
+                  guard let fileURL = Bundle.resources.url(forResource: "MFiGameController", withExtension: "deltamapping") else { return nil }
+                  return try? GameControllerInputMapping(fileURL: fileURL)
+              }
+          }
+          SWIFT
+
       - name: Build (unsigned)
         run: |
           set -o pipefail
