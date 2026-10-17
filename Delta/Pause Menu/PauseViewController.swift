@@ -20,7 +20,7 @@ class PauseViewController: UIViewController, PauseInfoProviding
     }
     
     var pauseItems: [MenuItem] {
-        return [self.saveStateItem, self.loadStateItem, self.cheatCodesItem, self.fastForwardItem, self.sustainButtonsItem, self.screenshotItem, self.controllerItem, self.askLuItem].compactMap { $0 }
+        return [self.saveStateItem, self.loadStateItem, self.cheatCodesItem, self.fastForwardItem, self.sustainButtonsItem, self.screenshotItem, self.askLuItem].compactMap { $0 }
     }
     
     var closeButtonTitle: String = NSLocalizedString("Main Menu", comment: "")
@@ -159,6 +159,8 @@ extension PauseViewController
                     self?.dismiss()
                 } stopHandler: { [weak self] in
                     self?.returnToMainMenu()
+                } controllerHandler: { [weak self] in
+                    self?.presentControllerSettings()
                 }
                 self.pauseNavigationController.setViewControllers([pauseViewController], animated: false)
                 
@@ -285,12 +287,6 @@ private extension PauseViewController
         self.fastForwardItem = MenuItem(text: NSLocalizedString("Fast Forward", comment: ""), image: #imageLiteral(resourceName: "FastForward"), action: { _ in })
         self.sustainButtonsItem = MenuItem(text: NSLocalizedString("Hold Buttons", comment: ""), image: #imageLiteral(resourceName: "SustainButtons"), action: { _ in })
         self.screenshotItem = MenuItem(text: NSLocalizedString("Screenshot", comment: ""), image: #imageLiteral(resourceName: "Screenshot"), action: { _ in })
-        
-        // Same icon as Settings > Controllers.
-        self.controllerItem = MenuItem(text: NSLocalizedString("Controller", comment: ""), image: UIImage(systemName: "gamecontroller"), action: { [unowned self] item in
-            item.isSelected = false
-            self.presentControllerSettings()
-        })
         
         if let game = emulatorCore.game as? Game
         {
