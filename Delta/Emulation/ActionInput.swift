@@ -21,6 +21,7 @@ enum ActionInput: String
     case toggleFastForward
     case reverseScreens
     case screenshot
+    case toggleFirmPress // Steam Controller: turns "Require Firm Press to Touch" on/off.
 }
 
 extension ActionInput: Input
