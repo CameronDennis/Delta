@@ -98,6 +98,15 @@ struct PauseView: View
         }
     }
     
+    // Square icon so the glass button renders as a circle (the gamecontroller symbol is wide).
+    private var controllerIcon: some View {
+        Image(systemName: "gamecontroller")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 18, height: 18)
+            .accessibilityLabel(Text("Controller"))
+    }
+    
     // Inverse of the Resume button's purple.
     private var controllerTint: Color {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
@@ -141,7 +150,7 @@ struct PauseView: View
                     if let controllerHandler
                     {
                         ToolbarItem(placement: .topBarLeading) {
-                            Button("Controller", systemImage: "gamecontroller", role: .confirm, action: controllerHandler)
+                            Button(role: .confirm, action: controllerHandler) { controllerIcon }
                                 .tint(controllerTint)
                                 .glassEffect()
                                 .glassEffectTransition(.materialize)
@@ -165,7 +174,7 @@ struct PauseView: View
                     
                     if let controllerHandler
                     {
-                        Button("Controller", systemImage: "gamecontroller", role: .confirm, action: controllerHandler)
+                        Button(role: .confirm, action: controllerHandler) { controllerIcon }
                             .glassEffect()
                             .tint(controllerTint)
                             .glassEffectTransition(.materialize)
