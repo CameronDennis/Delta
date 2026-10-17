@@ -150,7 +150,7 @@ struct PauseView: View
                     if let controllerHandler
                     {
                         ToolbarItem(placement: .topBarLeading) {
-                            Button(role: .confirm, action: controllerHandler) { controllerIcon }
+                            Button(role: .confirm, action: controllerHandler) { Label { Text("Controller") } icon: { controllerIcon }.labelStyle(.iconOnly) }
                                 .tint(controllerTint)
                                 .glassEffect()
                                 .glassEffectTransition(.materialize)
@@ -174,7 +174,7 @@ struct PauseView: View
                     
                     if let controllerHandler
                     {
-                        Button(role: .confirm, action: controllerHandler) { controllerIcon }
+                        Button(role: .confirm, action: controllerHandler) { Label { Text("Controller") } icon: { controllerIcon }.labelStyle(.iconOnly) }
                             .glassEffect()
                             .tint(controllerTint)
                             .glassEffectTransition(.materialize)
