@@ -399,6 +399,7 @@ private struct InputMappingRow: View
         }
     }
     
+    @ViewBuilder
     var pickerBody: some View {
         let isCustomized = editor.normalizedInput(editor.inputMapping.input(forControllerInput: controllerInput)) != editor.normalizedInput(defaultInput)
         
