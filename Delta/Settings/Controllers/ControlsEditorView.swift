@@ -243,14 +243,6 @@ private struct SteamMappingSections: View
 {
     let editor: ControlsEditor
     
-    var mappedStrings: Set<String> {
-        Set(editor.inputMapping.supportedControllerInputs.map(\.stringValue))
-    }
-    
-    var mappedExtras: [Input] {
-        SteamInput.extras.filter { mappedStrings.contains($0.stringValue) }
-    }
-    
     var body: some View {
         ForEach(InputSection.steamSections, id: \.name) { section in
             Section(section.name) {
@@ -260,32 +252,14 @@ private struct SteamMappingSections: View
             }
         }
         
-        Section(String(localized: "Extra Buttons")) {
-            ForEach(mappedExtras, id: \.stringValue) { input in
+        Section {
+            ForEach(SteamInput.extras, id: \.stringValue) { input in
                 InputMappingRow(editor: editor, controllerInput: input)
             }
-            .onDelete { offsets in
-                let inputs = offsets.map { mappedExtras[$0] }
-                for input in inputs
-                {
-                    editor.inputMapping.set(nil, forControllerInput: input)
-                }
-            }
-            
-            Menu {
-                let available = SteamInput.extras.filter { !mappedStrings.contains($0.stringValue) }
-                
-                ForEach(available, id: \.stringValue) { input in
-                    Button(input.localizedDisplayName) {
-                        if let defaultInput = editor.system.editorInputs.first
-                        {
-                            editor.inputMapping.set(defaultInput, forControllerInput: input)
-                        }
-                    }
-                }
-            } label: {
-                Label("Add Button", systemImage: "plus")
-            }
+        } header: {
+            Text("Extra Buttons")
+        } footer: {
+            Text("These have no bindings until you pick one.")
         }
         
         if editor.system == .ds
@@ -298,6 +272,8 @@ private struct SteamMappingSections: View
             } footer: {
                 Text("The whole trackpad maps to the bottom screen. Touch to tap, slide to drag.")
             }
+            
+            SteamTouchscreenOptions()
         }
     }
 }
@@ -374,6 +350,15 @@ private struct InputMappingRow: View
         editor.defaultMapping.input(forControllerInput: controllerInput)
     }
     
+    var noneLabel: String {
+        if defaultInput == nil
+        {
+            return controllerInput.type == .controller(.steam) ? String(localized: "None") : String(localized: "Remove")
+        }
+        
+        return String(localized: "Default")
+    }
+    
     var body: some View {
         let isCustomized = editor.normalizedInput(editor.inputMapping.input(forControllerInput: controllerInput)) != editor.normalizedInput(defaultInput)
         
@@ -385,7 +370,7 @@ private struct InputMappingRow: View
                 } label: {
                     Label(controllerInput.localizedDisplayName, systemImage: controllerInput.sfSymbolName)
                 } currentValueLabel: {
-                    Text(mappedInput.wrappedValue?.localizedDisplayName ?? String(localized: defaultInput == nil ? "Remove" : "Default"))
+                    Text(mappedInput.wrappedValue?.localizedDisplayName ?? noneLabel)
                 }
             }
             else
@@ -403,7 +388,7 @@ private struct InputMappingRow: View
     
     @ViewBuilder
     var pickerOptions: some View {
-        Text(defaultInput == nil ? "Remove" : "Default")
+        Text(noneLabel)
             .tag(AnyInput?.none)
         
         Section {
