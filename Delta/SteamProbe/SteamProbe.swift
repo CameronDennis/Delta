@@ -114,6 +114,7 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         installed = true
 
         NotificationCenter.default.addObserver(self, selector: #selector(sceneDidActivate(_:)), name: UIScene.didActivateNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(applyOverlaySetting), name: UserDefaults.didChangeNotification, object: nil)
 
         log("SteamProbe ready. iOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)")
         startGameControllerWatching()
@@ -121,8 +122,34 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 
     @objc private func sceneDidActivate(_ notification: Notification)
     {
-        guard window == nil, let scene = notification.object as? UIWindowScene else { return }
-        buildWindow(scene: scene)
+        guard let scene = notification.object as? UIWindowScene else { return }
+        lastScene = scene
+
+        if window == nil
+        {
+            buildWindow(scene: scene)
+        }
+
+        applyOverlaySetting()
+    }
+
+    /// The "SC" debug overlay is only shown when enabled in Settings > Advanced.
+    private var lastScene: UIWindowScene?
+
+    @objc private func applyOverlaySetting()
+    {
+        let enabled = UserDefaults.standard.bool(forKey: "steam.debugOverlay")
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            if enabled, self.window == nil, let scene = self.lastScene
+            {
+                self.buildWindow(scene: scene)
+            }
+
+            self.window?.isHidden = !enabled
+        }
     }
 
     // MARK: - UI
@@ -226,7 +253,7 @@ final class SteamProbe: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         probeWindow.windowLevel = .alert + 1
         probeWindow.backgroundColor = .clear
         probeWindow.rootViewController = root
-        probeWindow.isHidden = false
+        probeWindow.isHidden = !UserDefaults.standard.bool(forKey: "steam.debugOverlay")
         window = probeWindow
 
         refreshText()
