@@ -131,6 +131,9 @@ extension Input
             case .select: return NSLocalizedString("Select", comment: "")
             }
             
+        case .controller(.steam):
+            return SteamInput(input: self)!.shortName
+            
         case .controller(.keyboard):
             let input = KeyboardGameController.Input(input: self)!
             switch input
@@ -250,6 +253,9 @@ extension Input
             case .start: return NSLocalizedString("Start", comment: "")
             case .select: return NSLocalizedString("Select", comment: "")
             }
+            
+        case .controller(.steam):
+            return SteamInput(input: self)!.displayName
             
         case .controller(.keyboard):
             let input = KeyboardGameController.Input(input: self)!
@@ -381,6 +387,9 @@ extension Input
             case .start: return "plus.circle"
             case .select: return "minus.circle"
             }
+            
+        case .controller(.steam):
+            return SteamInput(input: self)!.symbolName
             
         case .controller(.keyboard):
             let input = KeyboardGameController.Input(input: self)!
