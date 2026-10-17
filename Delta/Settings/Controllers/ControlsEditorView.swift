@@ -243,6 +243,10 @@ private struct SteamMappingSections: View
 {
     let editor: ControlsEditor
     
+    func isTouchscreen(_ xInput: SteamInput) -> Bool {
+        editor.inputMapping.input(forControllerInput: xInput)?.stringValue == MelonDSGameInput.touchScreenX.stringValue
+    }
+    
     var body: some View {
         ForEach(InputSection.steamSections, id: \.name) { section in
             Section(section.name) {
@@ -265,15 +269,18 @@ private struct SteamMappingSections: View
         if editor.system == .ds
         {
             Section {
-                SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY)
-                SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY)
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY, disables: [.leftPadClick, .leftPadTouch])
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY, disables: [.rightPadClick, .rightPadTouch])
             } header: {
                 Text("Touchscreen")
             } footer: {
                 Text("The whole trackpad maps to the bottom screen. Touch to tap, slide to drag.")
             }
             
-            SteamTouchscreenOptions()
+            if isTouchscreen(.leftPadX) || isTouchscreen(.rightPadX)
+            {
+                SteamTouchscreenOptions()
+            }
         }
     }
 }
@@ -284,6 +291,7 @@ private struct SteamTouchscreenToggle: View
     let title: String
     let xInput: SteamInput
     let yInput: SteamInput
+    let disables: [SteamInput]
     
     var isOn: Binding<Bool> {
         Binding(
@@ -295,6 +303,15 @@ private struct SteamTouchscreenToggle: View
                 let touchY: Input? = newValue ? MelonDSGameInput.touchScreenY : nil
                 editor.inputMapping.set(touchX, forControllerInput: xInput)
                 editor.inputMapping.set(touchY, forControllerInput: yInput)
+                
+                // The pad can't be both a touchscreen and buttons.
+                if newValue
+                {
+                    for input in disables
+                    {
+                        editor.inputMapping.set(nil, forControllerInput: input)
+                    }
+                }
             }
         )
     }
@@ -359,7 +376,39 @@ private struct InputMappingRow: View
         return String(localized: "Default")
     }
     
+    // The pad click/touch inputs are unavailable while that trackpad acts as the DS touchscreen.
+    var isDisabledByTouchscreen: Bool {
+        guard editor.system == .ds else { return false }
+        
+        func touchscreenOn(_ xInput: SteamInput) -> Bool {
+            editor.inputMapping.input(forControllerInput: xInput)?.stringValue == MelonDSGameInput.touchScreenX.stringValue
+        }
+        
+        let name = controllerInput.stringValue
+        if name == SteamInput.leftPadClick.stringValue || name == SteamInput.leftPadTouch.stringValue { return touchscreenOn(.leftPadX) }
+        if name == SteamInput.rightPadClick.stringValue || name == SteamInput.rightPadTouch.stringValue { return touchscreenOn(.rightPadX) }
+        return false
+    }
+    
+    @ViewBuilder
     var body: some View {
+        if isDisabledByTouchscreen
+        {
+            HStack {
+                Label(controllerInput.localizedDisplayName, systemImage: controllerInput.sfSymbolName)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Disabled")
+                    .foregroundStyle(.red)
+            }
+        }
+        else
+        {
+            pickerBody
+        }
+    }
+    
+    var pickerBody: some View {
         let isCustomized = editor.normalizedInput(editor.inputMapping.input(forControllerInput: controllerInput)) != editor.normalizedInput(defaultInput)
         
         Group {
