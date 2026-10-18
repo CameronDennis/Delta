@@ -278,7 +278,9 @@ extension Input
             }
             
         case .controller(.action):
-            let input = ActionInput(input: self)!
+            // Saved mappings may contain actions this version doesn't recognize.
+            guard let input = ActionInput(input: self) else { return self.stringValue }
+            
             switch input
             {
             case .quickSave: return NSLocalizedString("Quick Save", comment: "")
@@ -423,7 +425,9 @@ extension Input
             }
             
         case .controller(.action):
-            let input = ActionInput(input: self)!
+            // Saved mappings may contain actions this version doesn't recognize.
+            guard let input = ActionInput(input: self) else { return "questionmark.circle" }
+            
             switch input
             {
             case .quickSave: return "square.and.arrow.down"
