@@ -8,7 +8,7 @@ on:
       ref:
         description: Branch to build
         required: true
-        default: steam-controller-pr
+        default: steam-controller-support
 
 concurrency:
   group: build-pr
