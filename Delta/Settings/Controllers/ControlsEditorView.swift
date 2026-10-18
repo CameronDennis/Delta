@@ -271,6 +271,11 @@ private struct SteamMappingSections: View
             Section {
                 SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY)
                 SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY)
+                
+                if isTouchscreen(.leftPadX) || isTouchscreen(.rightPadX)
+                {
+                    SteamFirmPressBindingRow(editor: editor)
+                }
             } header: {
                 Text("Touchscreen")
             } footer: {
@@ -312,6 +317,50 @@ private struct SteamTouchscreenToggle: View
     }
 }
 
+// Picks which Steam Controller button toggles "Require Firm Press to Touch" (stored as that button -> ActionInput.toggleFirmPress).
+private struct SteamFirmPressBindingRow: View
+{
+    let editor: ControlsEditor
+    
+    var candidates: [SteamInput] {
+        SteamInput.buttons + SteamInput.extras
+    }
+    
+    var selection: Binding<String?> {
+        Binding(
+            get: {
+                candidates.first { editor.inputMapping.input(forControllerInput: $0)?.stringValue == ActionInput.toggleFirmPress.stringValue }?.stringValue
+            },
+            set: { newValue in
+                // Give any button currently bound to this action back its default.
+                for input in candidates where editor.inputMapping.input(forControllerInput: input)?.stringValue == ActionInput.toggleFirmPress.stringValue
+                {
+                    editor.inputMapping.set(editor.defaultMapping.input(forControllerInput: input), forControllerInput: input)
+                }
+                
+                if let newValue, let input = candidates.first(where: { $0.stringValue == newValue })
+                {
+                    editor.inputMapping.set(ActionInput.toggleFirmPress, forControllerInput: input)
+                }
+            }
+        )
+    }
+    
+    var body: some View {
+        Picker(selection: selection) {
+            Text("None").tag(String?.none)
+            
+            ForEach(candidates, id: \.stringValue) { input in
+                Label(input.localizedDisplayName, systemImage: input.sfSymbolName)
+                    .tag(String?.some(input.stringValue))
+            }
+        } label: {
+            Label("Toggle Firm Press", systemImage: "hand.tap")
+        }
+        .pickerStyle(.menu)
+    }
+}
+
 // MARK: - Components -
 
 private struct InputSection
@@ -348,12 +397,6 @@ private struct InputMappingRow: View
     
     // AnyInput because the picker requires a Hashable type.
     static let actionInputs: [AnyInput] = [ActionInput.quickSave, .quickLoad, .fastForward, .screenshot].map(AnyInput.init)
-    
-    // The Steam Controller can also toggle its firm-press-to-touch setting.
-    var availableActionInputs: [AnyInput] {
-        let steamActions = (editor.controller.inputType == .steam) ? [AnyInput(ActionInput.toggleFirmPress)] : []
-        return Self.actionInputs + steamActions
-    }
     
     // The inputs that can be mapped to: this system's game inputs, plus Menu (pause).
     var mappableInputs: [AnyInput] {
@@ -447,7 +490,7 @@ private struct InputMappingRow: View
         }
         
         Section("Game Actions") {
-            ForEach(availableActionInputs, id: \.self) { input in
+            ForEach(Self.actionInputs, id: \.self) { input in
                 Label(input.localizedDisplayName, systemImage: input.sfSymbolName)
                     .tint(.accentColor)
                     .tag(AnyInput?.some(input))
