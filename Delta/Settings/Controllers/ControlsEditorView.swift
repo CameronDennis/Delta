@@ -125,6 +125,10 @@ struct ControlsEditorView: View
             {
                 KeyboardMappingSections(editor: editor)
             }
+            else if editor.controller.inputType == .steam
+            {
+                SteamMappingSections(editor: editor)
+            }
             else
             {
                 MFiMappingSections(editor: editor)
@@ -233,6 +237,81 @@ private struct KeyboardMappingSections: View
     }
 }
 
+// MARK: - Steam Controller -
+
+private struct SteamMappingSections: View
+{
+    let editor: ControlsEditor
+    
+    func isTouchscreen(_ xInput: SteamInput) -> Bool
+    {
+        editor.inputMapping.input(forControllerInput: xInput)?.stringValue == MelonDSGameInput.touchScreenX.stringValue
+    }
+    
+    var body: some View {
+        ForEach(InputSection.steamSections, id: \.name) { section in
+            Section(section.name) {
+                ForEach(section.inputs, id: \.stringValue) { input in
+                    InputMappingRow(editor: editor, controllerInput: input)
+                }
+            }
+        }
+        
+        Section {
+            ForEach(SteamInput.extras, id: \.stringValue) { input in
+                InputMappingRow(editor: editor, controllerInput: input)
+            }
+        } header: {
+            Text("Extra Buttons")
+        } footer: {
+            Text("These have no bindings until you pick one.")
+        }
+        
+        if editor.system == .ds
+        {
+            Section {
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY)
+                SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY)
+            } header: {
+                Text("Touchscreen")
+            } footer: {
+                Text("The whole trackpad maps to the bottom screen. Touch to tap, slide to drag.")
+            }
+            
+            if isTouchscreen(.leftPadX) || isTouchscreen(.rightPadX)
+            {
+                SteamTouchscreenSettingsView()
+            }
+        }
+    }
+}
+
+private struct SteamTouchscreenToggle: View
+{
+    let editor: ControlsEditor
+    let title: String
+    let xInput: SteamInput
+    let yInput: SteamInput
+    
+    var isOn: Binding<Bool> {
+        Binding(
+            get: {
+                editor.inputMapping.input(forControllerInput: xInput)?.stringValue == MelonDSGameInput.touchScreenX.stringValue
+            },
+            set: { newValue in
+                let touchX: Input? = newValue ? MelonDSGameInput.touchScreenX : nil
+                let touchY: Input? = newValue ? MelonDSGameInput.touchScreenY : nil
+                editor.inputMapping.set(touchX, forControllerInput: xInput)
+                editor.inputMapping.set(touchY, forControllerInput: yInput)
+            }
+        )
+    }
+    
+    var body: some View {
+        Toggle(title, isOn: isOn)
+    }
+}
+
 // MARK: - Components -
 
 private struct InputSection
@@ -244,6 +323,12 @@ private struct InputSection
         InputSection(name: String(localized: "Buttons"), inputs: [MFiGameController.Input.a, .b, .x, .y, .up, .down, .left, .right, .leftShoulder, .leftTrigger, .rightShoulder, .rightTrigger, .start, .select, .menu]),
         InputSection(name: String(localized: "Left Thumbstick"), inputs: [MFiGameController.Input.leftThumbstickUp, .leftThumbstickDown, .leftThumbstickLeft, .leftThumbstickRight]),
         InputSection(name: String(localized: "Right Thumbstick"), inputs: [MFiGameController.Input.rightThumbstickUp, .rightThumbstickDown, .rightThumbstickLeft, .rightThumbstickRight])
+    ]
+    
+    static let steamSections: [InputSection] = [
+        InputSection(name: String(localized: "Buttons"), inputs: SteamInput.buttons),
+        InputSection(name: String(localized: "Left Thumbstick"), inputs: SteamInput.leftThumbstick),
+        InputSection(name: String(localized: "Right Thumbstick"), inputs: SteamInput.rightThumbstick)
     ]
     
     static let keyboardSections: [InputSection] = [
@@ -273,7 +358,52 @@ private struct InputMappingRow: View
         editor.defaultMapping.input(forControllerInput: controllerInput)
     }
     
+    var noneLabel: String {
+        if defaultInput == nil
+        {
+            return controllerInput.type == .controller(.steam) ? String(localized: "None") : String(localized: "Remove")
+        }
+        
+        return String(localized: "Default")
+    }
+    
+    // The pad click/touch inputs are unavailable while that trackpad acts as the DS touchscreen.
+    var isDisabledByTouchscreen: Bool {
+        guard editor.system == .ds, controllerInput.type == .controller(.steam) else { return false }
+        
+        func isTouchscreen(_ xInput: SteamInput) -> Bool
+        {
+            editor.inputMapping.input(forControllerInput: xInput)?.stringValue == MelonDSGameInput.touchScreenX.stringValue
+        }
+        
+        switch SteamInput(stringValue: controllerInput.stringValue)
+        {
+        case .leftPadClick, .leftPadTouch: return isTouchscreen(.leftPadX)
+        case .rightPadClick, .rightPadTouch: return isTouchscreen(.rightPadX)
+        default: return false
+        }
+    }
+    
+    @ViewBuilder
     var body: some View {
+        if isDisabledByTouchscreen
+        {
+            HStack {
+                Label(controllerInput.localizedDisplayName, systemImage: controllerInput.sfSymbolName)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Disabled")
+                    .foregroundStyle(.red)
+            }
+        }
+        else
+        {
+            pickerBody
+        }
+    }
+    
+    @ViewBuilder
+    var pickerBody: some View {
         let isCustomized = editor.normalizedInput(editor.inputMapping.input(forControllerInput: controllerInput)) != editor.normalizedInput(defaultInput)
         
         Group {
@@ -284,7 +414,7 @@ private struct InputMappingRow: View
                 } label: {
                     Label(controllerInput.localizedDisplayName, systemImage: controllerInput.sfSymbolName)
                 } currentValueLabel: {
-                    Text(mappedInput.wrappedValue?.localizedDisplayName ?? String(localized: defaultInput == nil ? "Remove" : "Default"))
+                    Text(mappedInput.wrappedValue?.localizedDisplayName ?? noneLabel)
                 }
             }
             else
@@ -302,7 +432,7 @@ private struct InputMappingRow: View
     
     @ViewBuilder
     var pickerOptions: some View {
-        Text(defaultInput == nil ? "Remove" : "Default")
+        Text(noneLabel)
             .tag(AnyInput?.none)
         
         Section {
@@ -327,8 +457,8 @@ private struct InputMappingRow: View
             get: {
                 let current = editor.normalizedInput(editor.inputMapping.input(forControllerInput: controllerInput))
                 
-                // Keyboard rows always show their mapped input; controller rows collapse to "Default" when unchanged.
-                if controllerInput.type != .controller(.keyboard), current == editor.normalizedInput(defaultInput)
+                // Keyboard and Steam Controller rows always show their mapped input; controller rows collapse to "Default" when unchanged.
+                if controllerInput.type != .controller(.keyboard), controllerInput.type != .controller(.steam), current == editor.normalizedInput(defaultInput)
                 {
                     return nil
                 }
