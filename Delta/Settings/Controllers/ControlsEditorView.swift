@@ -271,11 +271,6 @@ private struct SteamMappingSections: View
             Section {
                 SteamTouchscreenToggle(editor: editor, title: String(localized: "Left Trackpad as Touchscreen"), xInput: .leftPadX, yInput: .leftPadY)
                 SteamTouchscreenToggle(editor: editor, title: String(localized: "Right Trackpad as Touchscreen"), xInput: .rightPadX, yInput: .rightPadY)
-                
-                if isTouchscreen(.leftPadX) || isTouchscreen(.rightPadX)
-                {
-                    SteamFirmPressBindingRow(editor: editor)
-                }
             } header: {
                 Text("Touchscreen")
             } footer: {
@@ -314,50 +309,6 @@ private struct SteamTouchscreenToggle: View
     
     var body: some View {
         Toggle(title, isOn: isOn)
-    }
-}
-
-// Picks which Steam Controller button toggles "Require Firm Press to Touch" (stored as that button -> ActionInput.toggleFirmPress).
-private struct SteamFirmPressBindingRow: View
-{
-    let editor: ControlsEditor
-    
-    var candidates: [SteamInput] {
-        SteamInput.buttons + SteamInput.extras
-    }
-    
-    var selection: Binding<String?> {
-        Binding(
-            get: {
-                candidates.first { editor.inputMapping.input(forControllerInput: $0)?.stringValue == ActionInput.toggleFirmPress.stringValue }?.stringValue
-            },
-            set: { newValue in
-                // Give any button currently bound to this action back its default.
-                for input in candidates where editor.inputMapping.input(forControllerInput: input)?.stringValue == ActionInput.toggleFirmPress.stringValue
-                {
-                    editor.inputMapping.set(editor.defaultMapping.input(forControllerInput: input), forControllerInput: input)
-                }
-                
-                if let newValue, let input = candidates.first(where: { $0.stringValue == newValue })
-                {
-                    editor.inputMapping.set(ActionInput.toggleFirmPress, forControllerInput: input)
-                }
-            }
-        )
-    }
-    
-    var body: some View {
-        Picker(selection: selection) {
-            Text("None").tag(String?.none)
-            
-            ForEach(candidates, id: \.stringValue) { input in
-                Label(input.localizedDisplayName, systemImage: input.sfSymbolName)
-                    .tag(String?.some(input.stringValue))
-            }
-        } label: {
-            Label("Toggle Firm Press", systemImage: "hand.tap")
-        }
-        .pickerStyle(.menu)
     }
 }
 
@@ -400,7 +351,15 @@ private struct InputMappingRow: View
     
     // The inputs that can be mapped to: this system's game inputs, plus Menu (pause).
     var mappableInputs: [AnyInput] {
-        editor.system.editorInputs.map(AnyInput.init) + [AnyInput(StandardGameControllerInput.menu)]
+        var inputs = editor.system.editorInputs.map(AnyInput.init) + [AnyInput(StandardGameControllerInput.menu)]
+        
+        // Nintendo DS + Steam Controller: a button can toggle "Require Firm Press to Touch".
+        if editor.system == .ds && editor.controller.inputType == .steam
+        {
+            inputs.append(AnyInput(ActionInput.toggleFirmPress))
+        }
+        
+        return inputs
     }
     
     var defaultInput: Input? {
