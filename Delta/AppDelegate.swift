@@ -44,6 +44,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate
         
         // Controllers
         ExternalGameControllerManager.shared.startMonitoring()
+        SteamControllerManager.shared.start()
         
         // JIT
         ServerManager.shared.prepare()
