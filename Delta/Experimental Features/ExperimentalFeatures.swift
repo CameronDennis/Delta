@@ -81,6 +81,11 @@ struct ExperimentalFeatures: FeatureContainer
              description: "Allow other apps to fetch your game library via the “delta://gameInfo?scheme=<callerScheme>” URL request. Delta responds by opening “<callerScheme>://delta?games=<payload>”, where the payload is a base64url-encoded JSON array of your games.")
     var libraryExport
 
+    @Feature(name: "Steam Controller",
+             description: "Use a Steam Controller (2026) over Bluetooth. Pair it in the Settings app first, then customize its controls in Delta’s Controllers settings.",
+             options: SteamControllerOptions())
+    var steamController
+
     private init()
     {
         self.prepareFeatures()
