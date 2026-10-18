@@ -332,16 +332,21 @@ struct SteamTouchscreenOptions: View
                     SteamSliderField(title: String(localized: "Size"), value: $size, sliderRange: 8...80, typedRange: 2...300, step: 1, scale: 1, unit: "pt", decimals: 0)
                     SteamSliderField(title: String(localized: "Outline Width"), value: $outlineWidth, sliderRange: 0...8, typedRange: 0...40, step: 0.5, scale: 1, unit: "pt", decimals: 1)
 
-                    SteamColorField(title: String(localized: "Fill Color"), prefix: "steam.cursor.fill", defaults: (1, 1, 1, 0.5))
-                    SteamColorField(title: String(localized: "Outline Color"), prefix: "steam.cursor.outline", defaults: (0, 0, 0, 0.8))
-
                     if requirePress
                     {
+                        SteamColorField(title: String(localized: "Fill Color"), prefix: "steam.cursor.fill", defaults: (1, 1, 1, 0.5))
+                        SteamColorField(title: String(localized: "Outline Color"), prefix: "steam.cursor.outline", defaults: (0, 0, 0, 0.8))
                         SteamColorField(title: String(localized: "Pressed Fill Color"), prefix: "steam.cursor.pressedFill", defaults: (1, 0.2, 0.2, 0.7))
                         SteamColorField(title: String(localized: "Pressed Outline Color"), prefix: "steam.cursor.pressedOutline", defaults: (0.5, 0, 0, 0.9))
                     }
+                    else
+                    {
+                        // Every touch is sent, so the cursor always uses the "pressed" look.
+                        SteamColorField(title: String(localized: "Fill Color"), prefix: "steam.cursor.pressedFill", defaults: (1, 0.2, 0.2, 0.7))
+                        SteamColorField(title: String(localized: "Outline Color"), prefix: "steam.cursor.pressedOutline", defaults: (0.5, 0, 0, 0.9))
+                    }
 
-                    SteamCursorPreview(showsPressed: requirePress)
+                    SteamCursorPreview(showsNormal: requirePress)
 
                     Button("Reset Cursor to Defaults", role: .destructive) {
                         SteamTouchSettings.resetCursor()
@@ -351,7 +356,7 @@ struct SteamTouchscreenOptions: View
         } header: {
             Text("Cursor")
         } footer: {
-            Text("The cursor appears on the bottom screen where your finger is on the trackpad. With a firm press required, it switches to the pressed colors while the touch is being sent to the game. Color pickers include opacity.")
+            Text("The cursor appears on the bottom screen where your finger is on the trackpad. When a firm press is required, the cursor shows the normal colors until the press is strong enough, then switches to the pressed colors. Without it, the pressed colors show whenever you touch, since every touch is sent to the game. Color pickers include opacity.")
         }
     }
 }
@@ -463,7 +468,8 @@ private struct SteamColorField: View
 
 private struct SteamCursorPreview: View
 {
-    let showsPressed: Bool
+    // The normal (not yet transmitted) cursor only exists when a firm press is required.
+    let showsNormal: Bool
 
     @AppStorage("steam.cursor.size") private var size = 26.0
     @AppStorage("steam.cursor.outlineWidth") private var outlineWidth = 2.0
@@ -499,17 +505,17 @@ private struct SteamCursorPreview: View
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(LinearGradient(colors: [Color(white: 0.25), Color(white: 0.75)], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: showsPressed ? 170 : 110, height: 70)
+                    .frame(width: showsNormal ? 170 : 110, height: 70)
 
                 HStack(spacing: 24) {
-                    dot(fill: Color(.sRGB, red: fillR, green: fillG, blue: fillB, opacity: fillA),
-                        line: Color(.sRGB, red: lineR, green: lineG, blue: lineB, opacity: lineA))
-
-                    if showsPressed
+                    if showsNormal
                     {
-                        dot(fill: Color(.sRGB, red: pFillR, green: pFillG, blue: pFillB, opacity: pFillA),
-                            line: Color(.sRGB, red: pLineR, green: pLineG, blue: pLineB, opacity: pLineA))
+                        dot(fill: Color(.sRGB, red: fillR, green: fillG, blue: fillB, opacity: fillA),
+                            line: Color(.sRGB, red: lineR, green: lineG, blue: lineB, opacity: lineA))
                     }
+
+                    dot(fill: Color(.sRGB, red: pFillR, green: pFillG, blue: pFillB, opacity: pFillA),
+                        line: Color(.sRGB, red: pLineR, green: pLineG, blue: pLineB, opacity: pLineA))
                 }
             }
         }
