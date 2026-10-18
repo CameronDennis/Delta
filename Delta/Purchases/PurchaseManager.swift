@@ -89,7 +89,9 @@ extension PurchaseManager
     
     @MainActor
     var isExperimentalFeaturesAvailable: Bool {
-        #if BETA
+        #if true // LOCAL TESTING ONLY (local-testing branch): never include this in a pull request.
+        return true
+        #elseif BETA
         // Experimental features are always available in BETA version.
         return true
         #elseif LEGACY
