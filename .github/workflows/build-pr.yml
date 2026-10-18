@@ -1,0 +1,93 @@
+name: Build PR branch (unsigned IPA)
+
+# Builds a branch exactly as committed (no Steam probe or project patching), for testing pull requests.
+# Run it from the Actions tab and pick the branch to build.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch to build
+        required: true
+        default: steam-controller-pr
+
+concurrency:
+  group: build-pr
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out branch (with submodules and Git LFS)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+          lfs: true
+
+      - name: Select newest Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$XC" ]; then echo "No Xcode 26 found on this runner"; exit 1; fi
+          echo "Using $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      # Same change as the pending DeltaCore pull request: make ExternalGameControllerManager.add/remove public.
+      # Does nothing once the submodule already contains it.
+      - name: Apply pending DeltaCore change
+        run: |
+          F="Cores/DeltaCore/DeltaCore/Game Controllers/ExternalGameControllerManager.swift"
+          perl -0pi -e 's/(\/\/MARK: - Managing Controllers -\n)private extension/$1public extension/' "$F"
+          grep -n -A2 "MARK: - Managing Controllers -" "$F"
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace Delta.xcworkspace \
+            -scheme Delta \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build.log
+
+      - name: Show compiler errors
+        if: failure()
+        run: |
+          grep -E "\.swift:[0-9]+:[0-9]+: error:" build.log | sort -u | head -60 || true
+          echo "----- last 30 lines -----"
+          tail -n 30 build.log
+
+      # The PR must not add compiler warnings, so list any in the files it touches.
+      - name: Show warnings in changed files
+        if: always()
+        run: |
+          grep -E "(Steam Controller/|SteamController\.swift|ControlsEditorView\.swift|Input\+Display\.swift|AppDelegate\.swift|ExperimentalFeatures\.swift).*: warning:" build.log | sort -u | head -60 || echo "No warnings in changed files"
+
+      - name: Package IPA
+        run: |
+          APP=$(find build/Build/Products -maxdepth 2 -name "Delta.app" | head -n 1)
+          echo "Found app at: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry Delta-PR.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Delta-PR-ipa
+          path: Delta-PR.ipa
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
