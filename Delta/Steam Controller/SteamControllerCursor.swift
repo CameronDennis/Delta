@@ -7,7 +7,6 @@
 //
 
 import UIKit
-import CoreImage
 
 import DeltaCore
 import DeltaFeatures
@@ -60,7 +59,7 @@ extension SteamControllerCursor
         }
 
         // Only show the cursor while the game is running in the foreground and can receive touches.
-        guard let window = self.makeWindowIfNeeded(), let screenFrame = self.bottomScreenFrame(in: window) else {
+        guard let window = self.makeWindowIfNeeded(), let screenFrame = self.touchScreenFrame(in: window) else {
             self.hide()
             return
         }
@@ -171,108 +170,67 @@ private extension SteamControllerCursor
 
 private extension SteamControllerCursor
 {
-    /// Finds the DS bottom screen in `cursorWindow`'s coordinate space.
+    /// Finds the DS touch screen (the bottom screen) in `cursorWindow`'s coordinate space.
     ///
-    /// Each DS screen is drawn by its own GameView, which crops its screen out of the combined 256x384 DS frame
-    /// (see GameView.update(for:) in DeltaCore). The bottom screen is the GameView whose crop starts lowest, so this
-    /// works for any controller skin layout: stacked, side-by-side, or reversed.
-    func bottomScreenFrame(in cursorWindow: UIWindow) -> CGRect?
+    /// Like `GameViewController.updateGameViews()`, this pairs the controller skin's screens with the game views that
+    /// display them, then picks the screen the skin marks as the touch screen. This works for any controller skin layout.
+    func touchScreenFrame(in cursorWindow: UIWindow) -> CGRect?
     {
         guard UIApplication.shared.applicationState == .active,
-              let windowScene = cursorWindow.windowScene, windowScene.activationState == .foregroundActive
+              let windowScene = cursorWindow.windowScene, windowScene.activationState == .foregroundActive,
+              let gameViewController = self.gameViewController(in: windowScene, excluding: cursorWindow),
+              gameViewController.emulatorCore?.state == .running, // False while the pause menu has paused emulation, since touches can't reach the game.
+              let traits = gameViewController.controllerView.controllerSkinTraits,
+              let controllerSkin = gameViewController.controllerView.controllerSkin,
+              let supportedTraits = controllerSkin.supportedTraits(for: traits),
+              let screens = controllerSkin.screens(for: supportedTraits)
         else { return nil }
 
-        var gameViews = [GameView]()
-        for window in windowScene.windows where window !== cursorWindow
-        {
-            self.collectVisibleGameViews(in: window, into: &gameViews)
-        }
+        // Screens and game views only line up when there is exactly one game view per screen.
+        let gameViews = gameViewController.gameViews
+        guard screens.count == gameViews.count else { return nil }
 
-        var screens = [(frame: CGRect, cropRect: CGRect?)]()
-        for gameView in gameViews
+        for (screen, gameView) in zip(screens, gameViews) where screen.isTouchScreen
         {
-            guard let window = gameView.window, gameView.bounds.width > 10, gameView.bounds.height > 10 else { continue }
-            guard self.isEmulationRunning(for: gameView) else { continue }
+            guard let window = gameView.window, !gameView.isHidden, gameView.alpha > 0, gameView.bounds.width > 10, gameView.bounds.height > 10 else { return nil }
 
             let frameInWindow = window.convert(gameView.bounds, from: gameView)
-            let frame = cursorWindow.convert(frameInWindow, from: window)
-            screens.append((frame, self.cropRect(for: gameView)))
-        }
-
-        // Usually, every DS screen is cropped from the combined frame. The bottom screen's crop starts at y = 192.
-        let croppedScreens = screens.filter { $0.cropRect != nil }
-        if let bottomScreen = croppedScreens.max(by: { $0.cropRect!.minY < $1.cropRect!.minY }),
-           croppedScreens.count >= 2 || bottomScreen.cropRect!.minY > 100
-        {
-            return bottomScreen.frame
-        }
-
-        // A single uncropped GameView showing both screens stacked (2:3 aspect ratio): use its lower half.
-        if let stackedScreens = screens.first(where: { $0.cropRect == nil && abs($0.frame.width / $0.frame.height - 2.0 / 3.0) < 0.08 })
-        {
-            let frame = stackedScreens.frame
-            return CGRect(x: frame.minX, y: frame.midY, width: frame.width, height: frame.height / 2)
+            return cursorWindow.convert(frameInWindow, from: window)
         }
 
         return nil
     }
 
-    func collectVisibleGameViews(in view: UIView, into gameViews: inout [GameView])
+    func gameViewController(in windowScene: UIWindowScene, excluding cursorWindow: UIWindow) -> DeltaCore.GameViewController?
     {
-        if let gameView = view as? GameView, !gameView.isHidden, gameView.alpha > 0
+        for window in windowScene.windows where window !== cursorWindow
         {
-            gameViews.append(gameView)
-        }
-
-        for subview in view.subviews
-        {
-            self.collectVisibleGameViews(in: subview, into: &gameViews)
-        }
-    }
-
-    // False while the pause menu (or anything else) has paused emulation, since touches can't reach the game.
-    func isEmulationRunning(for gameView: GameView) -> Bool
-    {
-        var responder: UIResponder? = gameView
-        while let currentResponder = responder
-        {
-            if let gameViewController = currentResponder as? DeltaCore.GameViewController
+            if let gameViewController = self.findGameViewController(in: window.rootViewController)
             {
-                return gameViewController.emulatorCore?.state == .running
-            }
-
-            responder = currentResponder.next
-        }
-
-        return true
-    }
-
-    // The rectangle (in DS frame coordinates, origin top-left) that `gameView` crops out of the full DS frame, if any.
-    func cropRect(for gameView: GameView) -> CGRect?
-    {
-        let filters: [CIFilter]
-
-        if let filterChain = gameView.filter as? FilterChain
-        {
-            filters = filterChain.inputFilters
-        }
-        else if let filter = gameView.filter
-        {
-            filters = [filter]
-        }
-        else
-        {
-            filters = []
-        }
-
-        for filter in filters where filter.name == "CICrop"
-        {
-            if let rectangle = filter.value(forKey: "inputRectangle") as? CIVector
-            {
-                return rectangle.cgRectValue
+                return gameViewController
             }
         }
 
         return nil
+    }
+
+    func findGameViewController(in viewController: UIViewController?) -> DeltaCore.GameViewController?
+    {
+        guard let viewController else { return nil }
+
+        if let gameViewController = viewController as? DeltaCore.GameViewController
+        {
+            return gameViewController
+        }
+
+        for child in viewController.children
+        {
+            if let gameViewController = self.findGameViewController(in: child)
+            {
+                return gameViewController
+            }
+        }
+
+        return self.findGameViewController(in: viewController.presentedViewController)
     }
 }
