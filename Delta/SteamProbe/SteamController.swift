@@ -416,8 +416,9 @@ final class SteamGameController: NSObject, GameController
 
         if isMappedToTouchscreen(xInput)
         {
-            // With a firm press required, the cursor changes color once the touch is actually sent.
-            SteamCursor.shared.show(x: nx, y: ny, source: index, pressed: SteamTouchSettings.requirePress && passes)
+            // The cursor uses its "pressed" look whenever the touch is actually being sent to the game
+            // (always, unless a firm press is required and hasn't been reached yet).
+            SteamCursor.shared.show(x: nx, y: ny, source: index, pressed: passes)
         }
 
         if passes
